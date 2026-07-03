@@ -38,7 +38,9 @@ class Lead(BaseModel):
     source: str = "reception"
 
 
-@app.get("/health")
+# GET + HEAD: UptimeRobot keepalive probes use HEAD, which plain @app.get
+# rejects with 405 and the monitor reports the service down.
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok", "service": "rudra-backend"}
 
