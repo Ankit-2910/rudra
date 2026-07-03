@@ -22,3 +22,5 @@ Thumbs.db
 
 # Claude Code local session files
 .claude/
+.vercel
+.env*

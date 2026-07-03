@@ -50,7 +50,7 @@ def store_lead(lead: Lead) -> bool:
     try:
         with psycopg.connect(database_url, connect_timeout=10) as conn:
             conn.execute(
-                "insert into leads (name, company, purpose, source) values (%s, %s, %s, %s)",
+                "insert into rudra.leads (name, company, purpose, source) values (%s, %s, %s, %s)",
                 (lead.name, lead.company, lead.purpose, lead.source),
             )
         return True
@@ -115,7 +115,7 @@ def kpis():
         try:
             with psycopg.connect(database_url, connect_timeout=10) as conn:
                 row = conn.execute(
-                    "select payload from kpi_snapshots order by captured_at desc limit 1"
+                    "select payload from rudra.kpi_snapshots order by captured_at desc limit 1"
                 ).fetchone()
             if row:
                 payload = row[0]
