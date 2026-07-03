@@ -1,0 +1,18 @@
+I'm building Project RUDRA for Shivanchal Consultants (Bhopal, India) — a "digital twin company" website where every employee is an AI agent, deployed at rudra.shivanchal.in. It's for recruiters/clients who will explore it instead of reading a resume, and Indian SME prospects. They need a working, deployed, demoable Phase 1 from this run — not a prototype or a plan.
+
+FIRST ACTION: Read RUDRA_SPEC.md in this directory (E:\HACKATHON\RUDRA\RUDRA_SPEC.md). It is the single source of truth: full Phase 1 specification (frontend, backend, AI employees, voice, database, env vars), the complete behavioral working rules, and the definition of done. Follow it exactly. If the file is missing, stop and ask me for it — do not improvise the spec.
+
+Build summary (details in RUDRA_SPEC.md): monorepo github.com/Ankit-2910/rudra. Frontend on Vercel — Next.js 14 + TypeScript + Tailwind, Three.js r128 3D headquarters (lobby + 4 rooms), voice commands via Web Speech API (English + Hindi), five AI employees (Reception, CEO, Finance, Legal→FinePrint, Tender→BidSight) chatting through a serverless Gemini proxy (thinkingBudget:0, 7s timeout, model fallback, scripted in-character failure lines), 2D isometric mobile fallback. Backend on Render free tier — FastAPI + Supabase: /health, /leads (Supabase insert + Slack webhook + Resend email), /kpis, plus SQL migrations. All secrets via env vars; README with full Vercel/Render/Supabase/DNS deployment steps. I work on Windows PowerShell — use Invoke-WebRequest, not curl, in any documented commands.
+
+Working rules (full versions in RUDRA_SPEC.md — read and apply them all):
+- When you have enough information to act, act. Give a recommendation, not an exhaustive survey.
+- Don't add features, refactor, or introduce abstractions beyond what the task requires. Do the simplest thing that works well. Only validate at system boundaries.
+- Before delivering any file, build locally and verify zero errors (Next.js production build; FastAPI startup). Complete files only, never partial edits.
+- Verify each completed component with subagents against RUDRA_SPEC.md before moving on.
+- Delegate independent subtasks to subagents and keep working while they run — the 3D scene, employee chat system, and backend API are independent.
+- Before reporting progress, audit each claim against a tool result from this session. Only report work you can point to evidence for; if something is not yet verified, say so explicitly.
+- Pause only for a destructive/irreversible action, a real scope change, or input only I can provide (API keys, DNS, deploy authorization). Ask and end the turn rather than ending on a promise.
+- Store one lesson per file in docs/lessons/ with a one-line summary at the top; update rather than duplicate; delete notes that turn out wrong.
+- Final summary: lead with the outcome, complete sentences, no working shorthand — it's my first look at everything.
+
+Definition of done: repo builds clean; README covers deployment end to end; the five employees respond in character through the Gemini proxy with working fallbacks; voice commands navigate the 3D scene; the mobile fallback renders; a lead submitted through Reception lands in Supabase and fires the Slack webhook. Close with a summary of exactly what was verified and exactly what still needs my keys or confirmation.
