@@ -5,7 +5,11 @@ import { PERSONAS, FALLBACK_LINES, isEmployeeRole } from "@/lib/personas";
 // most 7s and the chain stops when the remaining budget is too small.
 export const maxDuration = 10;
 
-const MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+// gemini-1.5-flash/pro were retired by Google (404 on generateContent) —
+// discovered live when 2.5-flash hit its free-tier rate limit and the
+// fallback chain fell straight through to the scripted line. Replaced with
+// currently-served models confirmed via ListModels for this key.
+const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
 const TOTAL_BUDGET_MS = 8500;
 const PER_CALL_TIMEOUT_MS = 7000;
 
