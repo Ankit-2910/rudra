@@ -1,6 +1,7 @@
 import html
 import json
 import os
+from typing import Optional
 
 import httpx
 import psycopg
@@ -38,6 +39,19 @@ class Lead(BaseModel):
     source: str = "reception"
 
 
+class Conversation(BaseModel):
+    employee_role: str
+    message: str
+    reply: str
+    visitor_name: Optional[str] = None
+
+
+class DwellEvent(BaseModel):
+    room: str
+    seconds: int
+    visitor_name: Optional[str] = None
+
+
 # GET + HEAD: UptimeRobot keepalive probes use HEAD, which plain @app.get
 # rejects with 405 and the monitor reports the service down.
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -60,16 +74,20 @@ def store_lead(lead: Lead) -> bool:
         return False
 
 
-def notify_slack(lead: Lead) -> bool:
+def notify_slack_text(text: str) -> bool:
     webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if not webhook_url:
         return False
-    text = f"\U0001f514 New RUDRA lead: {lead.name} ({lead.company}) — {lead.purpose}"
     try:
         resp = httpx.post(webhook_url, json={"text": text}, timeout=5)
         return resp.status_code < 300
     except Exception:
         return False
+
+
+def notify_slack(lead: Lead) -> bool:
+    text = f"\U0001f514 New RUDRA lead: {lead.name} ({lead.company}) — {lead.purpose}"
+    return notify_slack_text(text)
 
 
 def notify_email(lead: Lead) -> bool:
@@ -108,6 +126,34 @@ def create_lead(lead: Lead):
         "slack": notify_slack(lead),
         "email": notify_email(lead),
     }
+
+
+@app.post("/conversations")
+def log_conversation(convo: Conversation):
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return {"stored": False}
+    try:
+        with psycopg.connect(database_url, connect_timeout=10) as conn:
+            conn.execute(
+                "insert into rudra.conversations (employee_role, visitor_name, message, reply) "
+                "values (%s, %s, %s, %s)",
+                (convo.employee_role, convo.visitor_name, convo.message, convo.reply),
+            )
+        return {"stored": True}
+    except Exception:
+        return {"stored": False}
+
+
+# Fired once per room per visit when a visitor lingers past the frontend's
+# dwell threshold — turns idle browsing into a live sales signal in Slack.
+@app.post("/events/dwell")
+def dwell_event(event: DwellEvent):
+    who = event.visitor_name or "A visitor"
+    text = (
+        f"\U0001f440 {who} has been exploring {event.room} for {event.seconds}s on RUDRA"
+    )
+    return {"slack": notify_slack_text(text)}
 
 
 @app.get("/kpis")

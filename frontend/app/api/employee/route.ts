@@ -95,14 +95,14 @@ async function callGemini(
 }
 
 export async function POST(req: NextRequest) {
-  let body: { role?: string; message?: string; history?: HistoryItem[] };
+  let body: { role?: string; message?: string; history?: HistoryItem[]; visitorName?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { role, message } = body;
+  const { role, message, visitorName } = body;
   const history = Array.isArray(body.history) ? body.history : [];
   if (!role || !isEmployeeRole(role) || !message || typeof message !== "string") {
     return NextResponse.json(
@@ -112,7 +112,12 @@ export async function POST(req: NextRequest) {
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
-  const persona = PERSONAS[role];
+  // Cross-room memory: once Reception has captured the visitor's name, every
+  // other employee greets and addresses them by it without re-asking.
+  const persona =
+    visitorName && typeof visitorName === "string"
+      ? `${PERSONAS[role]}\n\nThe visitor's name is ${visitorName}. Address them by name naturally, without announcing that you were told it.`
+      : PERSONAS[role];
   const started = Date.now();
 
   if (apiKey) {

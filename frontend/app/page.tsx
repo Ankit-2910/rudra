@@ -5,6 +5,7 @@ import ChatPanel, { type Lead } from "../components/ChatPanel";
 import IsometricFallback from "../components/IsometricFallback";
 import Landing from "../components/Landing";
 import VoiceControls from "../components/VoiceControls";
+import { warmUpVoices } from "../lib/voice";
 import { EMPLOYEES, ROOMS, matchVoiceCommand, roomById, type RoomId } from "../lib/rooms";
 
 const Scene3D = dynamic(() => import("../components/Scene3D"), { ssr: false });
@@ -20,19 +21,69 @@ function webglAvailable(): boolean {
   }
 }
 
+// Guided tour script: one stop per department, skipping the lobby (the
+// visitor is already there). Each prompt is auto-sent when that room mounts.
+const TOUR_STOPS: { room: RoomId; prompt: string }[] = [
+  { room: "ceo", prompt: "Please introduce yourself and give me a quick tour of what Shivanchal does." },
+  { room: "finance", prompt: "Please introduce yourself and walk me through the finance dashboard." },
+  { room: "legal", prompt: "Please introduce yourself and tell me about FinePrint." },
+  { room: "tenders", prompt: "Please introduce yourself and tell me about BidSight." },
+];
+
+// How long a visitor must stay in one room before it's a real signal worth a
+// Slack ping, versus just passing through.
+const DWELL_THRESHOLD_MS = 45_000;
+
 export default function Home() {
   const [mode, setMode] = useState<"3d" | "2d" | null>(null);
   const [entered, setEntered] = useState(false);
   const [activeRoom, setActiveRoom] = useState<RoomId>("lobby");
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [visitorName, setVisitorName] = useState<string | null>(null);
+  const [touring, setTouring] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
   const historyRef = useRef<RoomId[]>([]);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dwellNotified = useRef<Set<RoomId>>(new Set());
+  const visitorNameRef = useRef<string | null>(null);
+  visitorNameRef.current = visitorName;
 
   // Decide 3D vs 2D once on mount: WebGL plus a reasonably wide viewport.
+  // Also warm up the speech synthesis voice list — the browser loads it
+  // asynchronously, and doing this early avoids the first reply falling
+  // back to a low-quality default voice while the real list is still loading.
   useEffect(() => {
     setMode(webglAvailable() && window.innerWidth >= 768 ? "3d" : "2d");
+    warmUpVoices();
   }, []);
+
+  // Dwell-time tracking: if a visitor stays in one room past the threshold,
+  // fire a one-time Slack signal so the team can see live interest forming.
+  useEffect(() => {
+    if (dwellTimer.current) clearTimeout(dwellTimer.current);
+    if (dwellNotified.current.has(activeRoom)) return;
+    dwellTimer.current = setTimeout(() => {
+      dwellNotified.current.add(activeRoom);
+      const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
+      if (!backend) return;
+      fetch(`${backend.replace(/\/$/, "")}/events/dwell`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          room: roomById(activeRoom).name,
+          seconds: Math.round(DWELL_THRESHOLD_MS / 1000),
+          visitor_name: visitorNameRef.current,
+        }),
+      }).catch(() => {
+        // Best-effort signal — silently drop on failure.
+      });
+    }, DWELL_THRESHOLD_MS);
+    return () => {
+      if (dwellTimer.current) clearTimeout(dwellTimer.current);
+    };
+  }, [activeRoom]);
 
   const showToast = useCallback((text: string) => {
     setToast(text);
@@ -76,8 +127,35 @@ export default function Home() {
     [goBack, navigate, showToast]
   );
 
+  // Guided tour: Gokarna → Manibhadra → Virabhadra → Bhairava, each room's
+  // question auto-sent on arrival and the tour advancing once the reply
+  // finishes speaking (see ChatPanel's onReplyComplete).
+  const startTour = useCallback(() => {
+    setTouring(true);
+    setTourStep(0);
+    navigate(TOUR_STOPS[0].room);
+    showToast("Starting the guided tour — sit back and listen.");
+  }, [navigate, showToast]);
+
+  const handleTourReplyComplete = useCallback(() => {
+    if (!touring) return;
+    const next = tourStep + 1;
+    if (next >= TOUR_STOPS.length) {
+      setTouring(false);
+      showToast("That's the full tour — feel free to explore or ask anything.");
+      return;
+    }
+    setTimeout(() => {
+      setTourStep(next);
+      navigate(TOUR_STOPS[next].room);
+    }, 1000);
+  }, [touring, tourStep, navigate, showToast]);
+
   const handleLead = useCallback(
     (lead: Lead) => {
+      // Cross-room memory: every employee after Reception can now greet and
+      // address the visitor by name (threaded through /api/employee).
+      setVisitorName(lead.name.split(/\s+/)[0]);
       const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
       if (!backend) {
         showToast("Details noted — thank you!");
@@ -119,14 +197,30 @@ export default function Home() {
         )}
 
         {/* Brand */}
-        <header className="pointer-events-none absolute left-4 top-4 z-10">
-          <h1 className="text-lg font-bold tracking-widest text-white">
-            RUDRA<span className="text-accent">.</span>
-          </h1>
-          <p className="text-xs text-muted">
-            Shivanchal Consultants — a company run by AI employees
-          </p>
+        <header className="pointer-events-none absolute left-4 top-4 z-10 flex items-start justify-between">
+          <div>
+            <h1 className="text-lg font-bold tracking-widest text-white">
+              RUDRA<span className="text-accent">.</span>
+            </h1>
+            <p className="text-xs text-muted">
+              Shivanchal Consultants — a company run by AI employees
+            </p>
+          </div>
         </header>
+
+        {!touring && (
+          <button
+            onClick={startTour}
+            className="nav-pill cta-glow absolute right-4 top-4 z-10 rounded-full bg-accent px-4 py-2 text-xs font-bold text-base"
+          >
+            🎬 Take the Tour
+          </button>
+        )}
+        {touring && (
+          <div className="absolute right-4 top-4 z-10 rounded-full border border-accent/50 bg-panel/90 px-4 py-2 text-xs font-semibold text-accent backdrop-blur">
+            Touring — stop {tourStep + 1} of {TOUR_STOPS.length}
+          </div>
+        )}
 
         {/* Navigation: always-available buttons + mic */}
         <nav className="absolute bottom-3 left-1/2 z-10 flex w-full max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 px-2">
@@ -170,6 +264,13 @@ export default function Home() {
           pendingMessage={activeRoom === "lobby" ? pendingMessage : null}
           onPendingConsumed={() => setPendingMessage(null)}
           onLead={handleLead}
+          visitorName={visitorName}
+          tourPrompt={
+            touring && TOUR_STOPS[tourStep]?.room === activeRoom
+              ? TOUR_STOPS[tourStep].prompt
+              : null
+          }
+          onReplyComplete={handleTourReplyComplete}
         />
       </aside>
     </main>

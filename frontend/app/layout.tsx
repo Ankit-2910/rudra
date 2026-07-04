@@ -1,10 +1,27 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
+const TITLE = "RUDRA — Shivanchal's AI Digital Twin Company";
+const DESCRIPTION =
+  "Explore Shivanchal Consultants as a living 3D company where every employee is an AI agent. Reception, CEO, Finance, Legal (FinePrint), and Tender Intelligence (BidSight).";
+
 export const metadata: Metadata = {
-  title: "RUDRA — Shivanchal's AI Digital Twin Company",
-  description:
-    "Explore Shivanchal Consultants as a living 3D company where every employee is an AI agent. Reception, CEO, Finance, Legal (FinePrint), and Tender Intelligence (BidSight).",
+  metadataBase: new URL("https://rudra.shivanchal.in"),
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: {
+    title: TITLE,
+    description: DESCRIPTION,
+    url: "https://rudra.shivanchal.in",
+    siteName: "RUDRA",
+    type: "website",
+    locale: "en_IN",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 export const viewport: Viewport = {

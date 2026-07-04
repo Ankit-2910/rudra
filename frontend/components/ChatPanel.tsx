@@ -23,17 +23,30 @@ export default function ChatPanel({
   pendingMessage,
   onPendingConsumed,
   onLead,
+  visitorName,
+  tourPrompt,
+  onReplyComplete,
 }: {
   role: EmployeeRole;
   pendingMessage: string | null;
   onPendingConsumed: () => void;
   onLead: (lead: Lead) => void;
+  // Known once Reception captures it; personalizes the greeting and is sent
+  // to the Gemini proxy so every subsequent employee can address them by name.
+  visitorName?: string | null;
+  // Auto-sent once on mount when the guided tour drives this room.
+  tourPrompt?: string | null;
+  // Fires after the reply is fully delivered (speech end, or immediately if
+  // TTS is off/unavailable) — the tour orchestrator uses this to advance.
+  onReplyComplete?: () => void;
 }) {
   const employee = EMPLOYEES[role];
   const color = roomById(employee.room).color;
-  const [messages, setMessages] = useState<Message[]>([
-    { from: "ai", text: employee.tagline },
-  ]);
+  const greeting =
+    visitorName && role !== "reception"
+      ? `${visitorName} ji! ${employee.tagline}`
+      : employee.tagline;
+  const [messages, setMessages] = useState<Message[]>([{ from: "ai", text: greeting }]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -65,7 +78,12 @@ export default function ChatPanel({
         const res = await fetch("/api/employee", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role, message: trimmed, history }),
+          body: JSON.stringify({
+            role,
+            message: trimmed,
+            history,
+            ...(visitorName ? { visitorName } : {}),
+          }),
         });
         const data = await res.json();
         reply = data.reply ?? "";
@@ -76,15 +94,50 @@ export default function ChatPanel({
       setBusy(false);
       setMessages((m) => [...m, { from: "ai", text: reply }]);
       if (lead) onLead(lead);
+
+      const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
+      if (backend && reply) {
+        fetch(`${backend.replace(/\/$/, "")}/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            employee_role: role,
+            message: trimmed,
+            reply,
+            visitor_name: visitorName ?? null,
+          }),
+        }).catch(() => {
+          // Best-effort transcript logging — never blocks the chat.
+        });
+      }
+
       if (tts && synthesisSupported()) {
-        speak(
+        // Watchdog: some browsers/embedded webviews silently drop the
+        // "end" event (backgrounded tab, no audio device, headless
+        // context). Without this, a stalled speak() would freeze the
+        // guided tour forever waiting for onReplyComplete.
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          setSpeaking(false);
+          onReplyComplete?.();
+        };
+        const watchdogMs = Math.min(20_000, 1500 + reply.length * 70);
+        const watchdog = setTimeout(finish, watchdogMs);
+        void speak(
           reply,
           () => setSpeaking(true),
-          () => setSpeaking(false)
+          () => {
+            clearTimeout(watchdog);
+            finish();
+          }
         );
+      } else {
+        onReplyComplete?.();
       }
     },
-    [busy, messages, role, tts, onLead]
+    [busy, messages, role, tts, onLead, visitorName, onReplyComplete]
   );
 
   // Voice commands like "prepare proposal" arrive as a pending message.
@@ -95,6 +148,16 @@ export default function ChatPanel({
       void send(pendingMessage);
     }
   }, [pendingMessage, busy, onPendingConsumed, send]);
+
+  // Guided tour: auto-ask this room's question once, right after mount.
+  const tourFired = useRef(false);
+  useEffect(() => {
+    if (tourPrompt && !tourFired.current) {
+      tourFired.current = true;
+      void send(tourPrompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tourPrompt]);
 
   return (
     <div className="flex h-full flex-col bg-panel/95 backdrop-blur">

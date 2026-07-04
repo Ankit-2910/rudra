@@ -25,9 +25,26 @@ receptionist captures leads that land in Supabase and alert Slack + email.
   gemini-1.5-pro`, and a scripted in-character line if everything fails.
 - **Backend** — FastAPI on Render free tier: `GET /health` (UptimeRobot
   keepalive), `POST /leads` (Supabase insert → Slack webhook → Resend email),
-  `GET /kpis` (dashboard data with built-in sample fallback).
+  `POST /conversations` (transcript logging), `POST /events/dwell` (dwell-time
+  Slack signal), `GET /kpis` (dashboard data with built-in sample fallback).
 - **Database** — Supabase PostgreSQL (`leads`, `conversations`,
   `kpi_snapshots`).
+
+### Extra features
+
+- **Guided tour** — "🎬 Take the Tour" flies the camera through Gokarna →
+  Manibhadra → Virabhadra → Bhairava, each auto-asking a question and
+  advancing once the reply finishes (with a watchdog so a stalled TTS
+  callback can never hang the tour).
+- **Cross-room memory** — once Reception captures a visitor's name, every
+  other employee greets and addresses them by it (threaded through
+  `/api/employee`'s system instruction).
+- **Dwell-time Slack alerts** — staying in one room past 45s fires a one-time
+  "👀 exploring Finance" ping to Slack via `/events/dwell`, once per room per
+  visit.
+- **Social preview card** — `app/opengraph-image.tsx` generates the
+  LinkedIn/WhatsApp share image at request time (Next.js `next/og`), matching
+  the live brand palette.
 
 ## Repository layout
 
