@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ChatPanel, { type Lead } from "../components/ChatPanel";
 import IsometricFallback from "../components/IsometricFallback";
+import Landing from "../components/Landing";
 import VoiceControls from "../components/VoiceControls";
 import { EMPLOYEES, ROOMS, matchVoiceCommand, roomById, type RoomId } from "../lib/rooms";
 
@@ -21,6 +22,7 @@ function webglAvailable(): boolean {
 
 export default function Home() {
   const [mode, setMode] = useState<"3d" | "2d" | null>(null);
+  const [entered, setEntered] = useState(false);
   const [activeRoom, setActiveRoom] = useState<RoomId>("lobby");
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -102,7 +104,9 @@ export default function Home() {
   const employee = EMPLOYEES[room.employee];
 
   return (
-    <main className="flex h-dvh flex-col md:flex-row">
+    <main className="relative flex h-dvh flex-col md:flex-row">
+      {/* Premium landing gate — the 3D scene loads behind it */}
+      {!entered && <Landing onEnter={() => setEntered(true)} />}
       {/* Headquarters view */}
       <div className="relative h-[42dvh] min-h-0 flex-none md:h-auto md:flex-1">
         {mode === "3d" && (
@@ -128,7 +132,7 @@ export default function Home() {
         <nav className="absolute bottom-3 left-1/2 z-10 flex w-full max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 px-2">
           <button
             onClick={goBack}
-            className="rounded-full border border-edge bg-panel/90 px-3.5 py-2 text-xs font-medium text-muted hover:text-white"
+            className="nav-pill rounded-full border border-edge bg-panel/90 px-3.5 py-2 text-xs font-medium text-muted backdrop-blur hover:text-white"
           >
             ← Back
           </button>
@@ -136,12 +140,13 @@ export default function Home() {
             <button
               key={r.id}
               onClick={() => navigate(r.id)}
-              className="rounded-full border px-3.5 py-2 text-xs font-medium transition-colors"
+              className="nav-pill rounded-full border px-3.5 py-2 text-xs font-medium backdrop-blur"
               style={{
                 borderColor: activeRoom === r.id ? r.color : "#1f2a3d",
                 color: activeRoom === r.id ? r.color : "#b9c5d8",
                 background:
-                  activeRoom === r.id ? `${r.color}1a` : "rgba(17,24,39,0.9)",
+                  activeRoom === r.id ? `${r.color}1a` : "rgba(17,24,39,0.85)",
+                boxShadow: activeRoom === r.id ? `0 0 18px ${r.color}44` : undefined,
               }}
             >
               {r.id === "lobby" ? "Reception" : r.name.split(" ")[0]}

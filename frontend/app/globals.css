@@ -51,3 +51,128 @@ body {
 .mic-live {
   animation: pulse-ring 1.6s ease-out infinite;
 }
+
+/* ── Premium landing ─────────────────────────────────────── */
+
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+.float-slow {
+  animation: float-y 6s ease-in-out infinite;
+}
+
+@keyframes orb-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(60px, -40px) scale(1.15);
+  }
+  66% {
+    transform: translate(-40px, 30px) scale(0.92);
+  }
+}
+
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  /* Soft-glow via gradient, not filter: blur() — a 90px blur on large
+     animated elements stalls compositing on weak GPUs. */
+  background: radial-gradient(circle, var(--orb-color, #f59e0b) 0%, transparent 65%) !important;
+  opacity: 0.3;
+  animation: orb-drift 18s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.text-shimmer {
+  background: linear-gradient(
+    110deg,
+    #f5f8ff 20%,
+    #f59e0b 40%,
+    #38bdf8 55%,
+    #f5f8ff 75%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 6s linear infinite;
+}
+
+@keyframes cta-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 24px rgba(245, 158, 11, 0.35), 0 0 60px rgba(245, 158, 11, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(245, 158, 11, 0.6), 0 0 90px rgba(245, 158, 11, 0.25);
+  }
+}
+
+.cta-glow {
+  animation: cta-glow 2.8s ease-in-out infinite;
+}
+
+.glass {
+  background: rgba(17, 24, 39, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(139, 155, 180, 0.16);
+}
+
+.tilt-card {
+  transform-style: preserve-3d;
+  transition: transform 0.18s ease-out, border-color 0.25s ease, box-shadow 0.25s ease;
+  will-change: transform;
+}
+
+.landing-grid {
+  background-image: linear-gradient(rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, black 30%, transparent 75%);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise-in {
+  opacity: 0;
+  animation: rise-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Nav pills + interactive polish */
+.nav-pill {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease,
+    color 0.2s ease, background-color 0.2s ease;
+}
+
+.nav-pill:hover {
+  transform: translateY(-3px);
+}

@@ -8,10 +8,10 @@ receptionist captures leads that land in Supabase and alert Slack + email.
 | Employee | Room | What it does |
 |---|---|---|
 | **RUDRA** — Reception AI | Lobby | Greets, routes, captures name/company/purpose as a lead |
-| **Arya** — CEO AI | CEO Office | Vision, services, guided tour |
-| **Vitta** — Finance AI | Finance | Animated Chart.js KPI dashboard that reacts while it speaks |
-| **Nyaya** — Legal AI | Legal | Introduces **FinePrint** ([fine-print-two.vercel.app](https://fine-print-two.vercel.app)) for live contract analysis |
-| **Bodhi** — Tender AI | Tenders | **BidSight** — government tender intelligence for Indian SMEs |
+| **Gokarna** — CEO AI | CEO Office | Vision, services, guided tour |
+| **Manibhadra** — Finance AI | Finance | Animated Chart.js KPI dashboard that reacts while it speaks |
+| **Virabhadra** — Legal AI | Legal | Introduces **FinePrint** ([fine-print-two.vercel.app](https://fine-print-two.vercel.app)) for live contract analysis |
+| **Bhairava** — Tender AI | Tenders | **BidSight** — government tender intelligence for Indian SMEs |
 
 ## Architecture (₹0/month)
 

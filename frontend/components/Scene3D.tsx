@@ -32,11 +32,17 @@ const CAMERA_POSES: Record<
   tenders: { position: [7.5, 8, 28.5], target: [16, 2, 16] },
 };
 
-const FLY_DURATION_MS = 1200;
+// Cinematic entry: the camera starts way up here and glides down into the
+// lobby pose on first load.
+const ENTRY_POSITION: [number, number, number] = [0, 60, 80];
 
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
+// Exponential smoothing rates (per second). Higher = snappier.
+const CAM_DAMP = 2.4;
+const SWAY_DAMP = 1.8;
+const HOVER_DAMP = 7.0;
+const GAZE_DAMP = 2.2;
+
+const STAR_COUNT = 500;
 
 // Idempotently inject the three.js r128 script tag and resolve with the
 // global THREE object once it is available.
@@ -105,10 +111,6 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           0.1,
           200
         );
-        const initialPose = CAMERA_POSES[activeRoomRef.current];
-        camera.position.set(...initialPose.position);
-        const camTarget = new THREE.Vector3(...initialPose.target);
-        camera.lookAt(camTarget);
 
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -116,8 +118,11 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
         container.appendChild(renderer.domElement);
 
         // ---------- Lighting ----------
-        scene.add(new THREE.AmbientLight(0x8899bb, 0.45));
-        const moon = new THREE.DirectionalLight(0xaabbee, 0.35);
+        // Hemisphere light gives the low-poly forms a soft sky/ground
+        // gradient so faces read with depth instead of flat ambient.
+        scene.add(new THREE.HemisphereLight(0x3b4a6e, 0x0a0e17, 0.65));
+        scene.add(new THREE.AmbientLight(0x8899bb, 0.28));
+        const moon = new THREE.DirectionalLight(0xaabbee, 0.4);
         moon.position.set(20, 30, 10);
         scene.add(moon);
 
@@ -126,8 +131,8 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           new THREE.PlaneGeometry(120, 120),
           new THREE.MeshStandardMaterial({
             color: 0x0d1220,
-            roughness: 0.95,
-            metalness: 0.1,
+            roughness: 0.7,
+            metalness: 0.35,
           })
         );
         floor.rotation.x = -Math.PI / 2;
@@ -138,11 +143,77 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
         grid.position.y = 0;
         scene.add(grid);
 
+        // ---------- Starfield ambience ----------
+        // Two additive point layers in the room accent colors + white,
+        // drifting in opposite directions with offset twinkle phases.
+        const palette: any[] = [
+          new THREE.Color(0xffffff),
+          new THREE.Color(0xffffff),
+          ...ROOMS.map((r) => new THREE.Color(r.color)),
+        ];
+        const makeStars = (count: number, size: number): any => {
+          const positions = new Float32Array(count * 3);
+          const colors = new Float32Array(count * 3);
+          for (let i = 0; i < count; i++) {
+            const radius = 16 + Math.random() * 48;
+            const angle = Math.random() * Math.PI * 2;
+            positions[i * 3] = Math.cos(angle) * radius;
+            positions[i * 3 + 1] = 4 + Math.random() * 40;
+            positions[i * 3 + 2] = Math.sin(angle) * radius;
+            const c = palette[(Math.random() * palette.length) | 0];
+            colors[i * 3] = c.r;
+            colors[i * 3 + 1] = c.g;
+            colors[i * 3 + 2] = c.b;
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+          geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+          const mat = new THREE.PointsMaterial({
+            size,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            sizeAttenuation: true,
+            fog: false,
+          });
+          const points = new THREE.Points(geo, mat);
+          scene.add(points);
+          return points;
+        };
+        const starsA = makeStars(Math.floor(STAR_COUNT * 0.6), 0.32);
+        const starsB = makeStars(Math.ceil(STAR_COUNT * 0.4), 0.2);
+
         // ---------- Helpers ----------
         const clickables: any[] = [];
         const bobbers: { obj: any; baseY: number; phase: number }[] = [];
-        const pulsingLights: { light: any; base: number; phase: number }[] = [];
         const glowMaterials: { mat: any; base: number; phase: number }[] = [];
+        // Per-room animated state: accent light, glow ring, hoverable slab.
+        const roomFx: {
+          id: RoomId;
+          light: any;
+          lightBase: number;
+          ring: any;
+          ringMat: any;
+          ringBaseY: number;
+          slab: any;
+          slabBaseY: number;
+          hover: number;
+          phase: number;
+        }[] = [];
+        // Employee "life": heads that occasionally look at the camera and a
+        // pulsing status orb above each figure.
+        const gazers: {
+          head: any;
+          orb: any;
+          orbMat: any;
+          orbBaseY: number;
+          worldX: number;
+          worldZ: number;
+          gaze: number;
+          phase: number;
+        }[] = [];
 
         const makeLabel = (text: string, accent: string): any => {
           const canvas = document.createElement("canvas");
@@ -177,8 +248,8 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           const desk = new THREE.Group();
           const woodMat = new THREE.MeshStandardMaterial({
             color: 0x2a2f45,
-            roughness: 0.6,
-            metalness: 0.25,
+            roughness: 0.55,
+            metalness: 0.3,
           });
           const top = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.25, 1.5), woodMat);
           top.position.y = 1.05;
@@ -200,7 +271,7 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           return desk;
         };
 
-        const makeEmployee = (accent: number): any => {
+        const makeEmployee = (accent: number): { fig: any; head: any } => {
           const fig = new THREE.Group();
           const bodyMat = new THREE.MeshStandardMaterial({
             color: 0x1b2338,
@@ -215,10 +286,24 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           );
           body.position.y = 0.85;
           fig.add(body);
-          const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 12), bodyMat);
+          // Head is a group so the whole face (skull + visor) can turn to
+          // "look" at the camera.
+          const head = new THREE.Group();
           head.position.y = 1.85;
+          const skull = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 12), bodyMat);
+          head.add(skull);
+          const visor = new THREE.Mesh(
+            new THREE.BoxGeometry(0.36, 0.12, 0.08),
+            new THREE.MeshStandardMaterial({
+              color: 0x0a0e17,
+              emissive: accent,
+              emissiveIntensity: 1.1,
+            })
+          );
+          visor.position.set(0, 0.04, 0.28);
+          head.add(visor);
           fig.add(head);
-          return fig;
+          return { fig, head };
         };
 
         // ---------- Build each room ----------
@@ -235,8 +320,8 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
             new THREE.BoxGeometry(slabSize, 0.2, slabSize),
             new THREE.MeshStandardMaterial({
               color: 0x161d31,
-              roughness: 0.85,
-              metalness: 0.15,
+              roughness: 0.5,
+              metalness: 0.4,
             })
           );
           slab.position.y = 0.1;
@@ -257,6 +342,22 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           trim.userData.roomId = room.id;
           group.add(trim);
           clickables.push(trim);
+
+          // Emissive glow ring hugging the slab, pulsing in the accent color.
+          const ringMat = new THREE.MeshBasicMaterial({
+            color: accent,
+            transparent: true,
+            opacity: 0.35,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          });
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(slabSize * 0.72, 0.07, 8, 48),
+            ringMat
+          );
+          ring.rotation.x = -Math.PI / 2;
+          ring.position.y = 0.14;
+          group.add(ring);
 
           // Desk.
           const desk = makeDesk(accent);
@@ -312,7 +413,7 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           }
 
           // AI employee figure behind the desk.
-          const employee = makeEmployee(accent);
+          const { fig: employee, head } = makeEmployee(accent);
           employee.position.set(isLobby ? 0 : 0.9, 0.2, isLobby ? 2.9 : -1.1);
           employee.traverse((child: any) => {
             if (child.isMesh) {
@@ -327,6 +428,29 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
             phase: Math.random() * Math.PI * 2,
           });
 
+          // Floating status orb above the employee's head.
+          const orbMat = new THREE.MeshBasicMaterial({
+            color: accent,
+            transparent: true,
+            opacity: 0.85,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          });
+          const orb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), orbMat);
+          orb.position.set(0, 2.55, 0);
+          employee.add(orb);
+
+          gazers.push({
+            head,
+            orb,
+            orbMat,
+            orbBaseY: orb.position.y,
+            worldX: rx + employee.position.x,
+            worldZ: rz + employee.position.z,
+            gaze: 0,
+            phase: Math.random() * Math.PI * 2,
+          });
+
           // Floating room label.
           const label = makeLabel(room.name, room.color);
           label.position.set(0, isLobby ? 6.2 : 4.6, 0);
@@ -336,40 +460,45 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
           const light = new THREE.PointLight(accent, 1.1, isLobby ? 22 : 16, 2);
           light.position.set(0, 4.5, 0);
           group.add(light);
-          pulsingLights.push({
+
+          roomFx.push({
+            id: room.id,
             light,
-            base: 1.1,
+            lightBase: 1.1,
+            ring,
+            ringMat,
+            ringBaseY: ring.position.y,
+            slab,
+            slabBaseY: slab.position.y,
+            hover: 0,
             phase: Math.random() * Math.PI * 2,
           });
 
           scene.add(group);
         }
 
-        // ---------- Camera flight state ----------
-        const flight = {
-          active: false,
-          dest: activeRoomRef.current as RoomId,
-          start: 0,
-          fromPos: new THREE.Vector3(),
-          toPos: new THREE.Vector3(),
-          fromTarget: new THREE.Vector3(),
-          toTarget: new THREE.Vector3(),
-        };
-
-        const startFlight = (dest: RoomId, now: number) => {
-          const pose = CAMERA_POSES[dest];
-          flight.active = true;
-          flight.dest = dest;
-          flight.start = now;
-          flight.fromPos.copy(camera.position);
-          flight.fromTarget.copy(camTarget);
-          flight.toPos.set(...pose.position);
-          flight.toTarget.set(...pose.target);
-        };
+        // ---------- Camera: smooth-damped flights + idle sway ----------
+        // The camera exponentially eases toward the desired pose every frame
+        // (spring-like, no fixed duration), starting from a high entry pose
+        // for a cinematic reveal.
+        const desiredPos = new THREE.Vector3(
+          ...CAMERA_POSES[activeRoomRef.current].position
+        );
+        const desiredTarget = new THREE.Vector3(
+          ...CAMERA_POSES[activeRoomRef.current].target
+        );
+        const smoothPos = new THREE.Vector3(...ENTRY_POSITION);
+        const smoothTarget = new THREE.Vector3(0, 1.5, 0);
+        camera.position.copy(smoothPos);
+        camera.lookAt(smoothTarget);
+        let currentDest: RoomId = activeRoomRef.current;
+        let swayAmt = 0; // 0 while flying, eases to 1 once settled
+        let lastNow = -1;
 
         // ---------- Interaction ----------
         const raycaster = new THREE.Raycaster();
         const pointer = new THREE.Vector2();
+        let hoveredRoom: RoomId | null = null;
 
         const pick = (event: PointerEvent | MouseEvent): RoomId | null => {
           const rect = renderer.domElement.getBoundingClientRect();
@@ -390,7 +519,13 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
         };
 
         const handlePointerMove = (event: PointerEvent) => {
-          container.style.cursor = pick(event) ? "pointer" : "default";
+          hoveredRoom = pick(event);
+          container.style.cursor = hoveredRoom ? "pointer" : "default";
+        };
+
+        const handlePointerLeave = () => {
+          hoveredRoom = null;
+          container.style.cursor = "default";
         };
 
         const handleResize = () => {
@@ -403,41 +538,95 @@ export default function Scene3D({ activeRoom, onRoomSelect }: Scene3DProps) {
 
         renderer.domElement.addEventListener("click", handleClick);
         renderer.domElement.addEventListener("pointermove", handlePointerMove);
+        renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
         window.addEventListener("resize", handleResize);
         cleanupListeners = () => {
           renderer.domElement.removeEventListener("click", handleClick);
           renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+          renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
           window.removeEventListener("resize", handleResize);
         };
 
-        // ---------- Animation loop ----------
+        // ---------- Animation loop (no per-frame allocations) ----------
         const animate = (now: number) => {
           if (disposed) return;
           rafId = requestAnimationFrame(animate);
           const t = now * 0.001;
+          if (lastNow < 0) lastNow = now;
+          const dt = Math.min((now - lastNow) / 1000, 0.05);
+          lastNow = now;
 
-          // Kick off a flight whenever the desired room changes.
-          if (activeRoomRef.current !== flight.dest) {
-            startFlight(activeRoomRef.current, now);
+          // Retarget whenever the desired room changes.
+          if (activeRoomRef.current !== currentDest) {
+            currentDest = activeRoomRef.current;
+            const pose = CAMERA_POSES[currentDest];
+            desiredPos.set(pose.position[0], pose.position[1], pose.position[2]);
+            desiredTarget.set(pose.target[0], pose.target[1], pose.target[2]);
           }
-          if (flight.active) {
-            const raw = Math.min((now - flight.start) / FLY_DURATION_MS, 1);
-            const k = easeInOutCubic(raw);
-            camera.position.lerpVectors(flight.fromPos, flight.toPos, k);
-            camTarget.lerpVectors(flight.fromTarget, flight.toTarget, k);
-            if (raw >= 1) flight.active = false;
-          }
-          camera.lookAt(camTarget);
 
-          // Idle life: bobbing figures, pulsing lights, glowing sign.
+          // Smooth-damp toward the pose; sway fades out during flights and
+          // breathes back in once the camera has settled.
+          const camK = 1 - Math.exp(-CAM_DAMP * dt);
+          smoothPos.lerp(desiredPos, camK);
+          smoothTarget.lerp(desiredTarget, camK);
+          const settling = smoothPos.distanceTo(desiredPos) < 1.2 ? 1 : 0;
+          swayAmt += (settling - swayAmt) * (1 - Math.exp(-SWAY_DAMP * dt));
+          camera.position.copy(smoothPos);
+          camera.position.x += Math.sin(t * 0.5) * 0.15 * swayAmt;
+          camera.position.y += Math.sin(t * 0.8 + 1.7) * 0.1 * swayAmt;
+          camera.lookAt(smoothTarget);
+
+          // Starfield drift + twinkle.
+          starsA.rotation.y = t * 0.012;
+          starsA.material.opacity = 0.7 + Math.sin(t * 1.3) * 0.18;
+          starsB.rotation.y = -t * 0.017;
+          starsB.material.opacity = 0.55 + Math.sin(t * 1.7 + 1.3) * 0.22;
+
+          // Idle life: bobbing figures, glowing sign.
           for (const b of bobbers) {
             b.obj.position.y = b.baseY + Math.sin(t * 1.8 + b.phase) * 0.14;
           }
-          for (const p of pulsingLights) {
-            p.light.intensity = p.base + Math.sin(t * 2.2 + p.phase) * 0.22;
-          }
           for (const g of glowMaterials) {
             g.mat.emissiveIntensity = g.base + Math.sin(t * 2.6 + g.phase) * 0.35;
+          }
+
+          // Room glow rings, pulsing lights and eased hover highlight.
+          const hoverK = 1 - Math.exp(-HOVER_DAMP * dt);
+          for (const fx of roomFx) {
+            const isActive = fx.id === activeRoomRef.current;
+            fx.hover += ((fx.id === hoveredRoom ? 1 : 0) - fx.hover) * hoverK;
+            const pulse = Math.sin(t * 2.3 + fx.phase);
+            fx.ringMat.opacity =
+              (isActive ? 0.6 + pulse * 0.28 : 0.26 + pulse * 0.1) +
+              fx.hover * 0.3;
+            const ringScale = 1 + fx.hover * 0.05 + (isActive ? pulse * 0.012 : 0);
+            fx.ring.scale.set(ringScale, ringScale, 1);
+            fx.light.intensity =
+              fx.lightBase +
+              pulse * 0.2 +
+              fx.hover * 1.1 +
+              (isActive ? 0.35 : 0);
+            fx.slab.position.y = fx.slabBaseY + fx.hover * 0.14;
+            fx.ring.position.y = fx.ringBaseY + fx.hover * 0.14;
+          }
+
+          // Employee heads occasionally turn toward the camera; status orbs
+          // float and pulse.
+          const gazeK = 1 - Math.exp(-GAZE_DAMP * dt);
+          for (const gz of gazers) {
+            const wants = Math.sin(t * 0.3 + gz.phase) > 0.45 ? 1 : 0;
+            gz.gaze += (wants - gz.gaze) * gazeK;
+            const yaw = Math.atan2(
+              camera.position.x - gz.worldX,
+              camera.position.z - gz.worldZ
+            );
+            gz.head.rotation.y = yaw * gz.gaze;
+            gz.head.rotation.x = -0.12 * gz.gaze;
+            gz.orb.position.y =
+              gz.orbBaseY + Math.sin(t * 2.1 + gz.phase) * 0.1;
+            const orbPulse = 0.75 + Math.sin(t * 3.1 + gz.phase) * 0.25;
+            gz.orbMat.opacity = orbPulse;
+            gz.orb.scale.set(orbPulse + 0.35, orbPulse + 0.35, orbPulse + 0.35);
           }
 
           renderer.render(scene, camera);
