@@ -98,21 +98,23 @@ function loadVoices(): Promise<SpeechSynthesisVoice[]> {
 }
 
 // Common voice names across Windows/Chrome/Edge, since "male"/"female" rarely
-// appears literally in the voice name itself. Every RUDRA employee is male,
-// so this steers away from the well-known female defaults (Zira, Hazel,
-// Susan, most "Google US English") even when no explicit gender is exposed.
-const KNOWN_MALE = /\b(david|mark|guy|ryan|christopher|george|ravi|hemant|prabhat|madhur)\b/i;
-const KNOWN_FEMALE = /\b(zira|hazel|susan|aria|jenny|heera|kalpana|swara|neerja)\b/i;
-// Windows' bundled SAPI5 voices (David/Mark/Zira/Hazel...) are the classic
-// robotic offline engine and are the most likely source of a visitor
-// complaining the English voice sounds "unprofessional" — deprioritize them
-// hard so any network voice (Google/Natural/Online) wins whenever present.
-const KNOWN_LEGACY_ROBOTIC = /\b(david|mark|zira|hazel|george|susan)\b/i;
+// appears literally in the voice name itself. A visitor confirmed the
+// available male voices (David/Mark/Hemant/Prabhat...) sound noticeably worse
+// than the available female ones (Zira/Kalpana...) on real hardware, so voice
+// selection now prefers a female voice for speech regardless of the
+// character's narrative gender — the AI employees stay male in the text and
+// grammar, only the synthesized audio timbre changes.
+const KNOWN_FEMALE = /\b(zira|hazel|susan|aria|jenny|heera|kalpana|swara|neerja|female)\b/i;
+const KNOWN_MALE = /\b(david|mark|guy|ryan|christopher|george|ravi|hemant|prabhat|madhur|male)\b/i;
+// Windows' bundled offline SAPI5 male voices (David/Mark/George) are the
+// classic robotic engine that reads as unprofessional; the female legacy
+// voices (Zira/Hazel/Susan) do not share that problem on this feedback, so
+// they are not penalized here.
+const KNOWN_LEGACY_ROBOTIC_MALE = /\b(david|mark|george)\b/i;
 
 // Rank voices for a target language: prefer high-quality network/neural
 // engines (Google, Microsoft "Online"/"Natural") over robotic offline
-// "Desktop"/"Compact" ones, and prefer a male-sounding voice since every
-// RUDRA employee is male.
+// "Desktop"/"Compact" ones, and strongly prefer a female-sounding voice.
 function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesisVoice | null {
   const prefix = lang.split("-")[0];
   const candidates = voices.filter((v) => v.lang.toLowerCase().startsWith(prefix));
@@ -125,9 +127,9 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string): SpeechSynthesi
     if (/google/i.test(name)) s += 8;
     if (/natural|online|neural/i.test(name)) s += 10;
     if (/desktop|compact/i.test(name)) s -= 6; // robotic offline voices
-    if (KNOWN_LEGACY_ROBOTIC.test(name)) s -= 3;
-    if (KNOWN_MALE.test(name) || /\bmale\b/i.test(name)) s += 4;
-    if (KNOWN_FEMALE.test(name) || /\bfemale\b/i.test(name)) s -= 3;
+    if (KNOWN_LEGACY_ROBOTIC_MALE.test(name)) s -= 5;
+    if (KNOWN_FEMALE.test(name)) s += 6;
+    if (KNOWN_MALE.test(name)) s -= 4;
     if (v.localService) s -= 1; // network voices are usually higher quality
     return s;
   };
@@ -143,8 +145,8 @@ export async function speak(text: string, onStart: () => void, onEnd: () => void
   const utterance = new SpeechSynthesisUtterance(text);
   const lang = DEVANAGARI.test(text) ? "hi-IN" : "en-IN";
   utterance.lang = lang;
-  utterance.rate = 0.98;
-  utterance.pitch = 0.92; // slightly lower pitch reads as more male, less shrill
+  utterance.rate = 0.96; // a touch slower reads as clearer and more deliberate
+  utterance.pitch = 1.04; // a touch brighter — natural for a female voice, adds warmth
 
   const voices = cachedVoices.length > 0 ? cachedVoices : await loadVoices();
   const best = pickVoice(voices, lang) ?? pickVoice(voices, "en");
